@@ -19,18 +19,23 @@ import wandb
 from tqdm import tqdm
 import inspect
 
+import numpy as np
+from functools import partial
+
 import torch
 from torch.autograd import profiler
 from torch.cuda.amp import GradScaler, autocast
 
 from imaginaire.datasets.utils.get_dataloader import get_train_dataloader, get_val_dataloader, get_test_dataloader
 from imaginaire.models.utils.init_weight import weights_init, weights_rescale
-from imaginaire.trainers.utils.get_trainer import _calculate_model_size, get_optimizer, get_scheduler, wrap_model
+from imaginaire.trainers.utils.get_trainer import _calculate_model_size, get_optimizer, get_scheduler, wrap_model, get_trainer, Config
 
 from imaginaire.utils.misc import to_cuda, requires_grad, to_cpu, Timer
 from imaginaire.utils.distributed import master_only_print as print
 from imaginaire.utils.distributed import is_master, get_rank
 from imaginaire.utils.set_random_seed import set_random_seed
+
+from projects.neuralangelo.utils.mesh import extract_mesh, extract_texture
 
 
 class BaseTrainer(object):
@@ -574,6 +579,7 @@ class Checkpointer(object):
         """
         checkpoint_file = 'latest_checkpoint.pt' if latest else \
                           f'epoch_{current_epoch:05}_iteration_{current_iteration:09}_checkpoint.pt'
+        
         if is_master():
             save_dict = to_cpu(self._collect_state_dicts())
             save_dict.update(
@@ -584,7 +590,73 @@ class Checkpointer(object):
             threading.Thread(
                 target=self._save_worker, daemon=False, args=(save_dict, checkpoint_file, get_rank())).start()
         checkpoint_path = self._get_full_path(checkpoint_file)
+
+        if not latest:
+            self.generate_checkpoint_mesh(checkpoint_path, current_iteration)
+
         return checkpoint_path
+    
+    def generate_checkpoint_mesh(self, checkpoint_path, current_iteration):
+
+        trainer_config_path = os.path.join(os.path.dirname(checkpoint_path), 'config.yaml')
+        cfg = Config(trainer_config_path)
+        output_file = os.path.join(os.path.dirname(checkpoint_path), f'iter_{current_iteration}_1024Res.ply')
+
+        # cfg_cmd = parse_cmdline_arguments(cfg_cmd)
+        # recursive_update_strict(cfg, cfg_cmd)
+        '''
+        --config", required=True, help="Path to the training config file."
+        --checkpoint", default="", help="Checkpoint path."
+        '--local_rank', type=int, default=os.getenv('LOCAL_RANK', 0)
+        '--single_gpu', action='store_true'
+        --resolution", default=512, type=int, help="Marching cubes resolution"
+        --block_res", default=64, type=int, help="Block-wise resolution for marching cubes"
+        --output_file", default="mesh.ply", type=str, help="Output file name"
+        --textured", action="store_true", help="Export mesh with texture"
+        --keep_lcc", action="store_true", help="Keep only largest connected component. May remove thin structures."
+        '''
+
+        # Initialize data loaders and models.
+        trainer = get_trainer(trainer_config_path, is_inference=True, seed=0)
+        # Load checkpoint.
+        trainer.checkpointer.load(checkpoint_path, load_opt=False, load_sch=False)
+        trainer.model.eval()
+
+        # Set the coarse-to-fine levels.
+        trainer.current_iteration = trainer.checkpointer.eval_iteration
+        if cfg.model.object.sdf.encoding.coarse2fine.enabled:
+            trainer.model_module.neural_sdf.set_active_levels(trainer.current_iteration)
+            if cfg.model.object.sdf.gradient.mode == "numerical":
+                trainer.model_module.neural_sdf.set_normal_epsilon()
+        
+        meta_fname = f"{cfg.data.root}/transforms.json"
+        with open(meta_fname) as file:
+            meta = json.load(file)
+        
+        if "aabb_range" in meta:
+            bounds = (np.array(meta["aabb_range"]) - np.array(meta["sphere_center"])[..., None]) / meta["sphere_radius"]
+        else:
+            bounds = np.array([[-1.0, 1.0], [-1.0, 1.0], [-1.0, 1.0]])
+
+        sdf_func = lambda x: -trainer.model_module.neural_sdf.sdf(x)  # noqa: E731
+        textured = True # Aply texture
+        texture_func = partial(extract_texture, neural_sdf=trainer.model_module.neural_sdf,
+                            neural_rgb=trainer.model_module.neural_rgb,
+                            appear_embed=trainer.model_module.appear_embed) if textured else None
+        mesh = extract_mesh(sdf_func=sdf_func, bounds=bounds, intv=(2.0 / 1024),
+                            block_res=128, texture_func=texture_func, filter_lcc=False)
+        
+        if is_master():
+            print(f"vertices: {len(mesh.vertices)}")
+            print(f"faces: {len(mesh.faces)}")
+            if textured:
+                print(f"colors: {len(mesh.visual.vertex_colors)}")
+            # center and scale
+            mesh.vertices = mesh.vertices * meta["sphere_radius"] + np.array(meta["sphere_center"])
+            mesh.update_faces(mesh.nondegenerate_faces())
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            mesh.export(output_file)
+        
 
     def _save_worker(self, save_dict, checkpoint_file, rank=0):
         checkpoint_path = self._get_full_path(checkpoint_file)
