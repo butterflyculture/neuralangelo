@@ -1,13 +1,13 @@
 # docker build -f docker/Dockerfile-colmap -t chenhsuanlin/colmap:3.8 .
 # docker push chenhsuanlin/colmap:3.8
 
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+# FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+FROM runpod/pytorch:2.0.1-py3.10-cuda11.8.0-devel-ubuntu22.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # colmap dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    cmake \
+    git  \
     ninja-build \
     build-essential \
     libboost-program-options-dev \
@@ -37,6 +37,7 @@ RUN git clone https://github.com/colmap/colmap.git && cd colmap && git checkout 
 RUN cd colmap && mkdir build && cd build && cmake .. -DCUDA_ENABLED=ON -DCMAKE_CUDA_ARCHITECTURES="70;72;75;80;86" -GNinja
 RUN cd colmap/build && ninja && ninja install
 
+
 # Set up Jupyter Notebook
 
 RUN pip install jupyter jupyter_contrib_nbextensions
@@ -46,8 +47,8 @@ RUN jupyter contrib nbextension install --user && \
 
 # GIT Repo
 WORKDIR /workspace
-RUN git clone https://github.com/NVlabs/neuralangelo.git
-RUN git submodule update --init --recursive
+RUN git clone https://github.com/butterflyculture/neuralangelo.git
+# RUN git submodule update --init --recursive
 VOLUME [ "/workspace/neuralangelo" ]
 
 # additional python packages
@@ -56,11 +57,14 @@ RUN apt-get update && apt-get install -y \
     ffmpeg
 RUN pip install \
     numpy \
-    pyyam
     addict \
     k3d \
     opencv-python-headless \
     pillow \
     plotly \
     pyyaml \
-    trimesh
+    trimesh \
+    gdown \
+    validators
+
+RUN nvcc --version
