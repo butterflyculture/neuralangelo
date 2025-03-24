@@ -33,3 +33,7 @@ termcolor
 tqdm
 trimesh
 wandb
+slackclient
+python-dotenv
+pytz
+
