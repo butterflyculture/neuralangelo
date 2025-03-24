@@ -36,6 +36,7 @@ from imaginaire.utils.distributed import is_master, get_rank
 from imaginaire.utils.set_random_seed import set_random_seed
 
 from projects.neuralangelo.utils.mesh import extract_mesh, extract_texture
+from neovoxel_bot import neovoxel_bot
 
 
 class BaseTrainer(object):
@@ -86,6 +87,9 @@ class BaseTrainer(object):
             self.credentials = None
         if 'TORCH_HOME' not in os.environ:
             os.environ['TORCH_HOME'] = os.path.join(os.environ['HOME'], ".cache")
+        
+        #Slack bot:
+        self.bot = bot = neovoxel_bot.NeoVoxelBot(channel='neovoxel-bot')
 
     def set_data_loader(self, cfg, split, shuffle=True, drop_last=True, seed=0):
         """Set the data loader corresponding to the indicated split.
@@ -579,6 +583,7 @@ class Checkpointer(object):
         """
         checkpoint_file = 'latest_checkpoint.pt' if latest else \
                           f'epoch_{current_epoch:05}_iteration_{current_iteration:09}_checkpoint.pt'
+        self.bot.send_message(f'*NEURALANGELO*: Iteration _{current_iteration}_ completed.')
         
         if is_master():
             save_dict = to_cpu(self._collect_state_dicts())
