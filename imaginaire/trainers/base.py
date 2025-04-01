@@ -18,6 +18,7 @@ import time
 import wandb
 from tqdm import tqdm
 import inspect
+from functools import partial
 
 import torch
 from torch.autograd import profiler
@@ -331,7 +332,8 @@ class BaseTrainer(object):
         # Save everything to the checkpoint.
         if current_iteration % self.cfg.checkpoint.save_iter == 0 or \
                 current_iteration == self.cfg.max_iter:
-            self.bot.send_message(f"Training checkpoint: _{current_iteration}_")
+            expname = self.cfg.source_filename.split('/')[-1].split('.')[0]
+            self.bot.send_message(f"{expname} Training checkpoint: _{current_iteration}_")
             self.checkpointer.save(current_epoch, current_iteration)
 
         # Save everything to the checkpoint using the name 'latest_checkpoint.pt'.
@@ -604,7 +606,7 @@ class Checkpointer(object):
             # Import necessary functions
             import json
             import numpy as np
-            from projects.neuralangelo.utils.mesh import extract_mesh
+            from projects.neuralangelo.utils.mesh import extract_mesh, extract_texture
             
             # Load metadata
             meta_fname = f"{self.cfg.data.root}/transforms.json"
@@ -626,6 +628,10 @@ class Checkpointer(object):
             self.model.eval()  # Set to eval mode
             with torch.no_grad():
                 sdf_func = lambda x: -self.model.module.neural_sdf.sdf(x)
+
+                texture_func = partial(extract_texture, neural_sdf=self.model.module.neural_sdf,
+                           neural_rgb=self.model.module.neural_rgb,
+                           appear_embed=self.model.module.appear_embed)
                 
                 # Extract mesh
                 mesh = extract_mesh(
