@@ -1,7 +1,6 @@
 import slack
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 from datetime import datetime
 import pytz
 
@@ -13,11 +12,9 @@ class NeoVoxelBot():
         # Get the directory where this script is located
         current_dir = Path(__file__).parent
         env_path = current_dir / '.env'
-        # Load env:
-        load_dotenv(env_path)
 
         # Establish client:
-        self.client = slack.WebClient(token=os.environ['SLACK_TOKEN'])
+        self.client = slack.WebClient(token=os.environ['NEOVOXEL_BOT_TOKEN'])
         self.channel = channel
     
     def __get_ist_time(self):
@@ -38,4 +35,4 @@ class NeoVoxelBot():
 if __name__=="__main__":
     # Debug code:
     bot = NeoVoxelBot(channel='neovoxel-bot')
-    bot.send_message("Hey, testing")
+    bot.send_message("Hey, testing - Runpod")
